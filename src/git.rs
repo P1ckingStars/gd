@@ -43,6 +43,16 @@ impl Spec {
         }
     }
 
+    /// The revisions this comparison names, for validation. The working tree
+    /// and index sides are not revisions and need no check.
+    pub fn revisions(&self) -> Vec<&str> {
+        match self {
+            Self::Worktree | Self::Staged => Vec::new(),
+            Self::Rev(r) => vec![r.as_str()],
+            Self::Range(a, b) => vec![a.as_str(), b.as_str()],
+        }
+    }
+
     /// The arguments that make `git diff` produce this comparison.
     fn diff_args(&self) -> Vec<String> {
         match self {
@@ -170,6 +180,51 @@ impl Repo {
         } else {
             branch
         }
+    }
+
+    /// Reject unusable revisions before the TUI takes over the terminal,
+    /// where a raw git error would be painted over by the first frame.
+    pub fn verify(&self, spec: &Spec) -> Result<()> {
+        for rev in spec.revisions() {
+            if self.resolves(rev) {
+                continue;
+            }
+            let mut msg = format!("unknown revision `{rev}`");
+            // `HEAD~N` nearly always comes from gd's own commit-count
+            // shorthand, so answer the question the user actually has.
+            if let Some(n) = rev.strip_prefix("HEAD~").and_then(|s| s.parse::<usize>().ok()) {
+                let have = self.commit_count();
+                msg.push_str(&format!(
+                    "\n       this repository has {have} commit{}, so there is nothing {n} back",
+                    if have == 1 { "" } else { "s" }
+                ));
+            }
+            bail!(msg);
+        }
+        Ok(())
+    }
+
+    /// Does `rev` name a commit?
+    fn resolves(&self, rev: &str) -> bool {
+        Command::new("git")
+            .current_dir(&self.root)
+            .args([
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{rev}^{{commit}}"),
+            ])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Commits reachable from HEAD; 0 in a repository with no commits.
+    pub fn commit_count(&self) -> usize {
+        self.run(&["rev-list", "--count", "HEAD"])
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {

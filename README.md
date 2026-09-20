@@ -53,10 +53,33 @@ Note that `gd` is a common shell alias for `git diff`. Check with
 ```
 gd                    HEAD against the working tree
 gd --staged           HEAD against the index
+```
+
+Recent commits are addressed by how far back they are. `1` is the last commit,
+`2` the one before it, and so on:
+
+```
+gd 1                  the last commit
+gd 3                  the last 3 commits, as one diff
+gd 2..4               the second, third and fourth commits back
+gd 4..2               the same window; either order reads alike
+```
+
+A bare `gd N` is exactly `gd 1..N`, so the two spellings never disagree. The
+pane titles always show the revisions the numbers resolved to -- `gd 2..4` is
+headed `HEAD~4` and `HEAD~1` -- so you can check the arithmetic at a glance.
+
+Revisions work as they always did:
+
+```
 gd HEAD~3             a revision against the working tree
 gd v1.0..v2.0         two revisions
 gd main feature       the same, spelled with a space
 ```
+
+An argument made only of digits is always a count, never a ref. If you have a
+branch or a short SHA spelled with digits alone, write it out -- `gd refs/tags/2`
+or `gd 1234^{commit}` -- and gd will treat it as a revision.
 
 ## Keys
 
@@ -134,7 +157,7 @@ the next key, exactly like `nowait = false`.
 ## Development
 
 ```
-cargo test        # 67 tests, no repository or terminal required
+cargo test        # 74 tests, no repository or terminal required
 cargo run -- --staged
 ```
 

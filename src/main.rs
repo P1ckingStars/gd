@@ -11,6 +11,7 @@ mod theme;
 mod tree;
 mod ui;
 
+use std::io::IsTerminal;
 use std::process::Command;
 use std::time::Duration;
 
@@ -27,10 +28,13 @@ gd -- view git diffs side by side
 
 USAGE:
     gd [OPTIONS] [REVISION]
-    gd [OPTIONS] <REVISION>..<REVISION>
-    gd [OPTIONS] <REVISION> <REVISION>
+    gd [OPTIONS] <N>
+    gd [OPTIONS] <A>..<B>
 
 ARGS:
+    <N>                 The last N commits. `gd 1` is the last commit.
+    <A>..<B>            Commits A through B, counting back from the newest.
+                        `gd 2..4` is the second, third and fourth back.
     <REVISION>          Compare this revision against the working tree.
     <REV>..<REV>        Compare two revisions.
 
@@ -63,8 +67,15 @@ fn main() -> Result<()> {
         }
     };
 
+    // Without this, ratatui's init panics with a bare OS error when gd is
+    // piped, redirected, or run from a script.
+    if !std::io::stdout().is_terminal() {
+        anyhow::bail!("gd needs an interactive terminal, and stdout is not one");
+    }
+
     let cwd = std::env::current_dir().context("cannot read the current directory")?;
     let repo = Repo::discover(&cwd)?;
+    repo.verify(&spec)?;
     let app = App::new(repo, spec)?;
 
     let terminal = ratatui::init();
@@ -73,6 +84,7 @@ fn main() -> Result<()> {
     result
 }
 
+#[derive(Debug)]
 enum Parsed {
     Spec(Spec),
     Help,
@@ -109,22 +121,74 @@ fn parse_args(args: &[String]) -> Result<Parsed, String> {
         0 => Ok(Parsed::Spec(Spec::Worktree)),
         1 => {
             let arg = &revs[0];
-            // `a..b` and `a...b` both mean "compare these two" here; git's
-            // three-dot merge-base semantics are not worth the surprise.
-            match arg.split_once("..") {
-                Some((a, b)) => {
-                    let b = b.strip_prefix('.').unwrap_or(b);
-                    if a.is_empty() || b.is_empty() {
-                        return Err(format!("`{arg}` needs a revision on both sides"));
-                    }
-                    Ok(Parsed::Spec(Spec::Range(a.to_string(), b.to_string())))
-                }
+            match split_range(arg)? {
+                Some((a, b)) => range(&a, &b),
+                // A bare count is the range starting at the last commit, so
+                // `gd 3` and `gd 1..3` mean the same thing.
+                None if is_count(arg) => range("1", arg),
                 None => Ok(Parsed::Spec(Spec::Rev(arg.clone()))),
             }
         }
-        2 => Ok(Parsed::Spec(Spec::Range(revs[0].clone(), revs[1].clone()))),
+        2 => range(&revs[0], &revs[1]),
         n => Err(format!("expected at most 2 revisions, got {n}")),
     }
+}
+
+/// Split `a..b` or `a...b`. git's three-dot merge-base semantics are not worth
+/// the surprise here, so both spellings mean "compare these two".
+fn split_range(arg: &str) -> Result<Option<(String, String)>, String> {
+    let Some((a, rest)) = arg.split_once("..") else {
+        return Ok(None);
+    };
+    let b = rest.strip_prefix('.').unwrap_or(rest);
+    if a.is_empty() || b.is_empty() {
+        return Err(format!("`{arg}` needs a revision on both sides"));
+    }
+    Ok(Some((a.to_string(), b.to_string())))
+}
+
+/// An all-digit argument is a commit count, not a revision name.
+fn is_count(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The revision `n` commits back from HEAD.
+fn back(n: usize) -> String {
+    if n == 0 {
+        "HEAD".into()
+    } else {
+        format!("HEAD~{n}")
+    }
+}
+
+/// Build a range from two arguments, which are either both counts or both
+/// revisions. Counting back from the newest commit, `1` is the last commit, so
+/// `2..4` covers the second, third and fourth commits back.
+fn range(a: &str, b: &str) -> Result<Parsed, String> {
+    let spec = match (is_count(a), is_count(b)) {
+        (true, true) => {
+            let (x, y): (usize, usize) = match (a.parse(), b.parse()) {
+                (Ok(x), Ok(y)) => (x, y),
+                _ => return Err(format!("`{a}..{b}` is too large to be a commit count")),
+            };
+            if x == 0 || y == 0 {
+                return Err("commit counts start at 1 -- `gd 1` is the last commit".into());
+            }
+            // Either order describes the same window of commits.
+            let (first, last) = (x.min(y), x.max(y));
+            // Everything from the commit before the oldest one named, up to the
+            // newest one named.
+            Spec::Range(back(last), back(first - 1))
+        }
+        (false, false) => Spec::Range(a.to_string(), b.to_string()),
+        _ => {
+            return Err(format!(
+                "`{a}..{b}` mixes a commit count with a revision -- spell both out, \
+                 as in `HEAD~4..main`"
+            ))
+        }
+    };
+    Ok(Parsed::Spec(spec))
 }
 
 /// How long a half-typed key sequence waits for the next key, as nvim's
@@ -232,6 +296,70 @@ mod tests {
     #[test]
     fn double_dash_protects_revisions_that_look_like_flags() {
         assert_eq!(spec(&["--", "-weird-branch"]), Spec::Rev("-weird-branch".into()));
+    }
+
+    fn err(args: &[&str]) -> String {
+        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        parse_args(&owned).expect_err(&format!("expected an error for {args:?}"))
+    }
+
+    #[test]
+    fn a_bare_count_is_the_last_n_commits() {
+        assert_eq!(spec(&["1"]), Spec::Range("HEAD~1".into(), "HEAD".into()));
+        assert_eq!(spec(&["2"]), Spec::Range("HEAD~2".into(), "HEAD".into()));
+        assert_eq!(spec(&["10"]), Spec::Range("HEAD~10".into(), "HEAD".into()));
+    }
+
+    #[test]
+    fn a_count_range_covers_both_endpoints() {
+        // Counting back, 1 is the last commit, so 2..4 is the second, third
+        // and fourth back: from the commit before the fourth, up to the second.
+        assert_eq!(spec(&["2..4"]), Spec::Range("HEAD~4".into(), "HEAD~1".into()));
+        assert_eq!(spec(&["1..3"]), Spec::Range("HEAD~3".into(), "HEAD".into()));
+    }
+
+    #[test]
+    fn a_bare_count_equals_the_range_that_starts_at_one() {
+        // This is the property that makes the shorthand coherent.
+        for n in 1..8 {
+            assert_eq!(spec(&[&n.to_string()]), spec(&[&format!("1..{n}")]));
+        }
+    }
+
+    #[test]
+    fn count_ranges_read_the_same_in_either_order() {
+        assert_eq!(spec(&["4..2"]), spec(&["2..4"]));
+        assert_eq!(spec(&["2", "4"]), spec(&["2..4"]));
+        assert_eq!(spec(&["2...4"]), spec(&["2..4"]));
+    }
+
+    #[test]
+    fn counts_are_rejected_when_they_cannot_mean_a_commit() {
+        assert!(err(&["0"]).contains("start at 1"));
+        assert!(err(&["0..3"]).contains("start at 1"));
+        // A count on one side and a revision on the other is ambiguous.
+        assert!(err(&["2..main"]).contains("mixes a commit count"));
+        assert!(err(&["main..2"]).contains("mixes a commit count"));
+    }
+
+    #[test]
+    fn revisions_that_merely_look_numeric_still_parse_as_counts() {
+        // Documented behaviour: an all-digit argument is always a count, so a
+        // ref spelled with digits alone has to be written out in full.
+        assert_eq!(spec(&["1234"]), Spec::Range("HEAD~1234".into(), "HEAD".into()));
+        assert_eq!(spec(&["refs/tags/2"]), Spec::Rev("refs/tags/2".into()));
+        assert_eq!(spec(&["v2"]), Spec::Rev("v2".into()));
+        // A SHA with any letter in it is unambiguous already.
+        assert_eq!(spec(&["1234abc"]), Spec::Rev("1234abc".into()));
+    }
+
+    #[test]
+    fn named_revisions_are_untouched_by_the_shorthand() {
+        assert_eq!(spec(&["HEAD~3"]), Spec::Rev("HEAD~3".into()));
+        assert_eq!(
+            spec(&["v1.0..v2.0"]),
+            Spec::Range("v1.0".into(), "v2.0".into())
+        );
     }
 
     #[test]
