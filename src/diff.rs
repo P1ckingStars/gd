@@ -79,6 +79,27 @@ pub struct Document {
 }
 
 impl Document {
+    /// The hunk start to jump to from row `from`.
+    ///
+    /// Returns the target row and whether the search wrapped past an end.
+    /// `None` when the file has no hunks at all.
+    pub fn step_hunk(&self, from: usize, forward: bool) -> Option<(usize, bool)> {
+        if self.hunks.is_empty() {
+            return None;
+        }
+        let next = if forward {
+            self.hunks.iter().find(|&&r| r > from).copied()
+        } else {
+            self.hunks.iter().rev().find(|&&r| r < from).copied()
+        };
+        match next {
+            Some(row) => Some((row, false)),
+            // Wrap, the way `]c` does at the end of a diff.
+            None if forward => Some((self.hunks[0], true)),
+            None => Some((*self.hunks.last().unwrap(), true)),
+        }
+    }
+
     pub fn binary() -> Self {
         Self {
             rows: Vec::new(),
@@ -510,6 +531,49 @@ mod tests {
         for (i, &row) in u.hunks.iter().enumerate() {
             assert_eq!(u.rows[row].hunk, i + 1);
         }
+    }
+
+    /// A document with hunks starting at the given rows.
+    fn with_hunks(hunks: &[usize]) -> Document {
+        Document {
+            rows: Vec::new(),
+            hunks: hunks.to_vec(),
+            added: 0,
+            removed: 0,
+            body: Body::Text,
+        }
+    }
+
+    #[test]
+    fn step_hunk_walks_forward_and_back() {
+        let doc = with_hunks(&[0, 10, 20]);
+        assert_eq!(doc.step_hunk(0, true), Some((10, false)));
+        assert_eq!(doc.step_hunk(10, true), Some((20, false)));
+        assert_eq!(doc.step_hunk(20, false), Some((10, false)));
+        // From between two hunks, not just from a hunk start.
+        assert_eq!(doc.step_hunk(5, true), Some((10, false)));
+        assert_eq!(doc.step_hunk(15, false), Some((10, false)));
+    }
+
+    #[test]
+    fn step_hunk_wraps_at_both_ends() {
+        let doc = with_hunks(&[0, 10, 20]);
+        assert_eq!(doc.step_hunk(20, true), Some((0, true)));
+        assert_eq!(doc.step_hunk(0, false), Some((20, true)));
+    }
+
+    #[test]
+    fn step_hunk_reports_a_file_with_no_hunks() {
+        assert_eq!(with_hunks(&[]).step_hunk(0, true), None);
+    }
+
+    #[test]
+    fn step_hunk_handles_a_single_hunk() {
+        let doc = with_hunks(&[7]);
+        // The only hunk is always the answer, and going there is a wrap.
+        assert_eq!(doc.step_hunk(7, true), Some((7, true)));
+        assert_eq!(doc.step_hunk(7, false), Some((7, true)));
+        assert_eq!(doc.step_hunk(0, true), Some((7, false)));
     }
 
     #[test]

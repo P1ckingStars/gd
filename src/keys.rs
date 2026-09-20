@@ -173,6 +173,7 @@ pub enum Action {
     SearchPrompt,
     SearchNext,
     SearchPrev,
+    ClearSearch,
 
     // Pickers (telescope)
     PickFiles,
@@ -259,6 +260,7 @@ const DIFF_ONLY: &[(&str, Action)] = &[
     ("/", Action::SearchPrompt),
     ("n", Action::SearchNext),
     ("N", Action::SearchPrev),
+    ("<Esc>", Action::ClearSearch),
     ("e", Action::OpenEditor),
     ("<CR>", Action::OpenEditor),
     ("Y", Action::YankPath),

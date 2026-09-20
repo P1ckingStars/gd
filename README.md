@@ -125,7 +125,9 @@ whole result set to a quickfix list you then walk with `]q` and `[q`.
 | `h` `l` `0` | scroll long lines sideways |
 | `zz` | centre the cursor |
 | `]c` / `[c` | next / previous hunk |
-| `/` `n` `N` | search inside this diff |
+| `n` / `N` | next / previous hunk -- or search match, if searching |
+| `/` | search inside this diff |
+| `<Esc>` | clear the search, so `n` steps between hunks again |
 | `za` | fold open: show the whole file instead of hunks |
 | `<Tab>` | switch between side-by-side and unified |
 | `s` | swap which version is on the left |
@@ -134,6 +136,10 @@ whole result set to a quickfix list you then walk with `]q` and `[q`.
 | `R` | re-read the repository |
 | `?` | every binding, in one screen |
 | `q` | quit |
+
+`n` and `N` do whatever is in front of you: with nothing searched they walk the
+hunks, and a live search takes them over until `<Esc>` clears it. The status
+line says which, showing either `hunk 3/126` or `/query 152`.
 
 Multi-key sequences resolve the way nvim's do. `<Space>` in the tree both
 toggles a node and starts a leader sequence: press it and `gd` waits 500ms for
@@ -157,7 +163,7 @@ the next key, exactly like `nowait = false`.
 ## Development
 
 ```
-cargo test        # 74 tests, no repository or terminal required
+cargo test        # 78 tests, no repository or terminal required
 cargo run -- --staged
 ```
 

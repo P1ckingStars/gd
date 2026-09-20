@@ -524,8 +524,15 @@ impl App {
                     input: String::new(),
                 }))
             }
-            Action::SearchNext => self.jump_to_match(true, false),
-            Action::SearchPrev => self.jump_to_match(false, false),
+            Action::SearchNext => self.search_or_hunk(true),
+            Action::SearchPrev => self.search_or_hunk(false),
+            Action::ClearSearch => {
+                if self.find.query.is_empty() {
+                    return Effect::None;
+                }
+                self.find = Find::default();
+                self.message = Some("search cleared -- n and N step between hunks".into());
+            }
 
             Action::PickFiles => self.open_picker(Kind::Files, None),
             Action::PickBuffers => self.open_picker(Kind::Buffers, None),
@@ -654,31 +661,14 @@ impl App {
 
     fn step_hunk(&mut self, forward: bool) {
         let Some(doc) = &self.doc else { return };
-        if doc.hunks.is_empty() {
+        let Some((row, wrapped)) = doc.step_hunk(self.cursor, forward) else {
             self.message = Some("no hunks".into());
             return;
-        }
-        let target = if forward {
-            doc.hunks.iter().find(|&&r| r > self.cursor).copied()
-        } else {
-            doc.hunks.iter().rev().find(|&&r| r < self.cursor).copied()
         };
-        match target {
-            Some(row) => {
-                self.cursor = row;
-                self.scroll_into_view();
-            }
-            None => {
-                // Wrap, like `]c` does at the end of a diff.
-                let row = if forward {
-                    doc.hunks[0]
-                } else {
-                    *doc.hunks.last().unwrap()
-                };
-                self.cursor = row;
-                self.scroll_into_view();
-                self.message = Some("search hit the end, wrapped".into());
-            }
+        self.cursor = row;
+        self.scroll_into_view();
+        if wrapped {
+            self.message = Some("hit the end, wrapped".into());
         }
     }
 
@@ -727,6 +717,17 @@ impl App {
             if hay.contains(&needle) {
                 self.find.matches.push(i);
             }
+        }
+    }
+
+    /// `n` and `N`. With no search active they step between hunks, which is
+    /// what you want the moment a diff opens; an active search takes them over
+    /// until it is cleared with `<Esc>`.
+    fn search_or_hunk(&mut self, forward: bool) {
+        if self.find.query.is_empty() {
+            self.step_hunk(forward);
+        } else {
+            self.jump_to_match(forward, false);
         }
     }
 
