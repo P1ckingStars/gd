@@ -564,8 +564,13 @@ impl App {
             }
             Action::TreeToggleNode => self.tree.toggle(&self.files),
             Action::TreeCloseNode => self.tree.close_node(&self.files),
-            Action::TreeCloseAll => self.tree.close_all(&self.files),
-            Action::TreeExpandAll => self.tree.expand_all(&self.files),
+            Action::TreeToggleAll => {
+                self.message = Some(match self.tree.toggle_all(&self.files) {
+                    Some(true) => "expanded every directory".into(),
+                    Some(false) => "collapsed every directory".into(),
+                    None => "nothing to fold -- every change is at the top level".into(),
+                });
+            }
             Action::TreeNavigateUp => self.tree.navigate_up(),
             Action::TreeFilter => {
                 self.overlay = Some(Overlay::Prompt(Prompt {

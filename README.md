@@ -110,12 +110,13 @@ whole result set to a quickfix list you then walk with `]q` and `[q`.
 | `<CR>` or `l` | open, or expand a directory |
 | `<Space>` | expand or collapse |
 | `C` or `h` | collapse this directory |
-| `z` / `Z` | collapse / expand everything |
+| `z` | collapse every directory, or expand them all back |
 | `<BS>` | go to the parent directory |
 | `/` | filter the tree |
 | `<C-x>` | clear the filter |
 | `<C-w>h` / `<C-w>l` | move between the tree and the diff |
 | `<C-w><` / `<C-w>>` | narrow / widen the tree |
+| `<leader>g` | group single-child directory chains into one row |
 
 ### Reading the diff
 
@@ -163,7 +164,7 @@ the next key, exactly like `nowait = false`.
 ## Development
 
 ```
-cargo test        # 78 tests, no repository or terminal required
+cargo test        # 82 tests, no repository or terminal required
 cargo run -- --staged
 ```
 

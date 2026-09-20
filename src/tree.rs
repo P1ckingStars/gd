@@ -252,6 +252,24 @@ impl Tree {
         self.flatten(files);
     }
 
+    /// One key for both directions: collapse everything if anything is open,
+    /// otherwise open everything. Returns what it did, or `None` when the
+    /// tree is flat and there is nothing to fold.
+    pub fn toggle_all(&mut self, files: &[FileEntry]) -> Option<bool> {
+        if !self.nodes.iter().any(Node::is_dir) {
+            return None;
+        }
+        // Only visible rows are checked, which is the point: once the top
+        // level is collapsed nothing below it counts as open.
+        let expanded = self.nodes.iter().any(|n| n.is_dir() && n.expanded);
+        if expanded {
+            self.close_all(files);
+        } else {
+            self.expand_all(files);
+        }
+        Some(!expanded)
+    }
+
     /// neo-tree's `<bs>`: jump to the parent directory row.
     pub fn navigate_up(&mut self) {
         let Some(node) = self.selected_node() else {
@@ -524,6 +542,45 @@ mod tests {
         // Wrapping past the end comes back to the first file.
         assert_eq!(t.step_file(true), Some(0));
         assert_eq!(t.step_file(false), Some(1));
+    }
+
+    #[test]
+    fn toggle_all_alternates_between_the_two_extremes() {
+        let files = entries(&["src/deep/x.rs", "src/y.rs", "other.rs"]);
+        let mut t = Tree::new(&files);
+        let open = t.nodes.len();
+
+        assert_eq!(t.toggle_all(&files), Some(false));
+        let shut = t.nodes.len();
+        assert!(shut < open, "collapsing should hide rows");
+
+        assert_eq!(t.toggle_all(&files), Some(true));
+        assert_eq!(t.nodes.len(), open);
+    }
+
+    #[test]
+    fn toggle_all_collapses_first_from_a_partly_open_tree() {
+        let files = entries(&["a/one.rs", "b/two.rs"]);
+        let mut t = Tree::new(&files);
+        let open = t.nodes.len();
+        // Collapse just one of the two directories.
+        t.reveal("a");
+        t.toggle(&files);
+        assert!(t.nodes.len() < open);
+
+        // Anything still open means the first press closes the rest.
+        assert_eq!(t.toggle_all(&files), Some(false));
+        assert!(!t.nodes.iter().any(|n| n.is_dir() && n.expanded));
+        assert_eq!(t.toggle_all(&files), Some(true));
+        assert_eq!(t.nodes.len(), open);
+    }
+
+    #[test]
+    fn toggle_all_reports_nothing_to_do_on_a_flat_tree() {
+        let files = entries(&["a.rs", "b.rs"]);
+        let mut t = Tree::new(&files);
+        assert_eq!(t.toggle_all(&files), None);
+        assert_eq!(t.nodes.len(), 2);
     }
 
     #[test]

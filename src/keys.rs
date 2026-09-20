@@ -187,8 +187,7 @@ pub enum Action {
     TreeOpen,
     TreeToggleNode,
     TreeCloseNode,
-    TreeCloseAll,
-    TreeExpandAll,
+    TreeToggleAll,
     TreeNavigateUp,
     TreeFilter,
     TreeClearFilter,
@@ -237,7 +236,7 @@ const SHARED: &[(&str, Action)] = &[
     ("<Tab>", Action::ToggleLayout),
     ("]q", Action::NextQuickfix),
     ("[q", Action::PrevQuickfix),
-    ("zg", Action::ToggleGroupDirs),
+    ("<leader>g", Action::ToggleGroupDirs),
 ];
 
 const DIFF_ONLY: &[(&str, Action)] = &[
@@ -284,8 +283,7 @@ const TREE_ONLY: &[(&str, Action)] = &[
     ("<Space>", Action::TreeToggleNode),
     ("C", Action::TreeCloseNode),
     ("h", Action::TreeCloseNode),
-    ("z", Action::TreeCloseAll),
-    ("Z", Action::TreeExpandAll),
+    ("z", Action::TreeToggleAll),
     ("<BS>", Action::TreeNavigateUp),
     ("/", Action::TreeFilter),
     ("<C-x>", Action::TreeClearFilter),
@@ -500,15 +498,27 @@ mod tests {
     }
 
     #[test]
-    fn pane_specific_bindings_override_shared_ones() {
+    fn z_folds_the_tree_without_waiting() {
+        // Nothing in the tree's table starts with `z` except `z` itself, so it
+        // must fire at once rather than sit through the sequence timeout.
         let map = Keymap::new();
         let mut p = Vec::new();
-        // `z` alone closes all nodes in the tree, but `zg`/`zz`/`za` exist too,
-        // so the tree must wait rather than fire immediately.
-        assert_eq!(resolve(&map, Context::Tree, &mut p, k('z')), Resolved::Pending);
         assert_eq!(
-            resolve(&map, Context::Tree, &mut p, k('q')),
-            Resolved::ActionThenReplay(Action::TreeCloseAll, k('q'))
+            resolve(&map, Context::Tree, &mut p, k('z')),
+            Resolved::Action(Action::TreeToggleAll)
+        );
+        assert!(p.is_empty());
+    }
+
+    #[test]
+    fn z_still_starts_a_sequence_in_the_diff_pane() {
+        // There `zz` and `za` exist, so `z` alone means nothing yet.
+        let map = Keymap::new();
+        let mut p = Vec::new();
+        assert_eq!(resolve(&map, Context::Diff, &mut p, k('z')), Resolved::Pending);
+        assert_eq!(
+            resolve(&map, Context::Diff, &mut p, k('a')),
+            Resolved::Action(Action::ToggleFullContext)
         );
     }
 
